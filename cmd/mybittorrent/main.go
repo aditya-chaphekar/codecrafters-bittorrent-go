@@ -17,15 +17,12 @@ var _ = json.Marshal
 // - 10:hello12345 -> hello12345
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Fprintln(os.Stderr, "Logs from your program will appear here!")
-
 	command := os.Args[1]
 
 	if command == "decode" {
 		bencodedValue := os.Args[2]
 
-		decoded, err := utils.DecodeBencode(bencodedValue)
+		decoded, _, err := utils.DecodeBencode(bencodedValue)
 		if err != nil {
 			fmt.Println(err)
 			return
