@@ -43,7 +43,7 @@ func main() {
 	command := os.Args[1]
 
 	if command == "decode" {
-		bencodedValue := os.Args[3]
+		bencodedValue := os.Args[2]
 
 		decoded, err := decodeBencode(bencodedValue)
 		if err != nil {
