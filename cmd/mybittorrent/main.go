@@ -15,28 +15,69 @@ var _ = json.Marshal
 // Example:
 // - 5:hello -> hello
 // - 10:hello12345 -> hello12345
-func decodeBencode(bencodedString string) (interface{}, error) {
-	if unicode.IsDigit(rune(bencodedString[0])) {
-		var firstColonIndex int
 
-		for i := 0; i < len(bencodedString); i++ {
-			if bencodedString[i] == ':' {
-				firstColonIndex = i
-				break
+func decodeString(bencodedString string) (interface{}, int, error) {
+	var firstColonIdx int
+	for i := 0; i < len(bencodedString); i++ {
+		if bencodedString[i] == ':' {
+			firstColonIdx = i
+			break
+		}
+	}
+
+	lengthStr := bencodedString[:firstColonIdx]
+	length, err := strconv.Atoi(lengthStr)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return bencodedString[firstColonIdx+1 : firstColonIdx+1+length], len(lengthStr) + 1 + length, nil
+
+}
+
+func decodeInt(bencodedString string) (interface{}, int, error) {
+	var EIdx int
+	for i := 0; i < len(bencodedString); i++ {
+		if bencodedString[i] == 'e' {
+			EIdx = i
+			break
+		}
+	}
+	retInt, err := strconv.Atoi(bencodedString[1:EIdx])
+	if err != nil {
+		fmt.Println("Error Converting to Int", err)
+	}
+
+	return retInt, len(bencodedString[1:EIdx]), nil
+}
+
+func decodeBencode(bencodedString string) (interface{}, error) {
+	i := 0
+	strLen := len(bencodedString)
+	var ret interface{}
+	for i = 0; i < strLen; i++ {
+		switch bencodedString[i] {
+		case 'i':
+			decodedInt, skip, err := decodeInt(bencodedString[i:])
+			i = skip
+			if err != nil {
+				fmt.Println("Error Decoding Int", err)
+			}
+			ret = decodedInt
+			break
+		default:
+			if unicode.IsDigit(rune(bencodedString[i])) {
+				decodedString, _, err := decodeString(bencodedString)
+				i = strLen
+				if err != nil {
+					fmt.Println("Error Decoding String", err)
+				}
+				ret = decodedString
+
 			}
 		}
-
-		lengthStr := bencodedString[:firstColonIndex]
-
-		length, err := strconv.Atoi(lengthStr)
-		if err != nil {
-			return "", err
-		}
-
-		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
-	} else {
-		return "", fmt.Errorf("Only strings are supported at the moment")
 	}
+	return ret, nil
 }
 
 func main() {
