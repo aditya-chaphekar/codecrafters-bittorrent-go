@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strconv"
 	"unicode"
@@ -110,10 +111,28 @@ func decodeBencode(bencodedString string) (interface{}, int, error) {
 		return nil, 0, errors.New("invalid bencoded string")
 	}
 }
+
+func extractMetadata(bencodedData map[string]interface{}) (string, int, error) {
+	announce, ok := bencodedData["announce"].(string)
+	if !ok {
+		return "", 0, errors.New("missing or invalid 'announce' field")
+	}
+	info, ok := bencodedData["info"].(map[string]interface{})
+	if !ok {
+		return "", 0, errors.New("missing or invalid 'info' field")
+	}
+	length, ok := info["length"].(int)
+	if !ok {
+		return "", 0, errors.New("missing or invalid 'length' field")
+	}
+	return announce, length, nil
+}
+
 func main() {
 	command := os.Args[1]
 
-	if command == "decode" {
+	switch command {
+	case "decode":
 		bencodedValue := os.Args[2]
 
 		decoded, _, err := decodeBencode(bencodedValue)
@@ -124,8 +143,31 @@ func main() {
 
 		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
-	} else {
-		fmt.Println("Unknown command: " + command)
-		os.Exit(1)
+		break
+	case "info":
+		filePath := os.Args[2]
+		fileData, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			fmt.Println("Error reading file:", err)
+			return
+		}
+		decoded, _, err := decodeBencode(string(fileData))
+		if err != nil {
+			fmt.Println("Error decoding file:", err)
+			return
+		}
+		if dict, ok := decoded.(map[string]interface{}); ok {
+			announce, length, err := extractMetadata(dict)
+			if err != nil {
+				fmt.Println("Error extracting metadata:", err)
+				return
+			}
+			fmt.Printf("Tracker URL: %s\nLength: %d\n", announce, length)
+		} else {
+			fmt.Println("Decoded data is not a dictionary")
+		}
+		break
+	default:
+		fmt.Println("Unknown command specified")
 	}
 }
