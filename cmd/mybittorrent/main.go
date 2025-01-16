@@ -71,6 +71,27 @@ func decodeList(bencodedString string) (interface{}, int, error) {
 	return retList, index, nil
 }
 
+func decodeDictionary(bencodedString string) (interface{}, int, error) {
+	dict := make(map[string]interface{})
+	index := 1
+	for index < len(bencodedString) {
+		if bencodedString[index] == 'e' {
+			return dict, index + 1, nil
+		}
+		key, keyLen, err := decodeString(bencodedString[index:])
+		if err != nil {
+			return nil, 0, err
+		}
+		value, valueLen, err := decodeBencode(bencodedString[index+keyLen:])
+		if err != nil {
+			return nil, 0, err
+		}
+		dict[key.(string)] = value
+		index += keyLen + valueLen
+	}
+	return nil, 0, errors.New("invalid bencoded dictionary: missing 'e'")
+}
+
 func decodeBencode(bencodedString string) (interface{}, int, error) {
 	if len(bencodedString) == 0 {
 		return nil, 0, errors.New("empty bencoded string")
@@ -80,8 +101,8 @@ func decodeBencode(bencodedString string) (interface{}, int, error) {
 		return decodeInt(bencodedString)
 	case 'l':
 		return decodeList(bencodedString)
-	// case 'd':
-	// 	return decodeDictionary(bencodedString)
+	case 'd':
+		return decodeDictionary(bencodedString)
 	default:
 		if unicode.IsDigit(rune(bencodedString[0])) {
 			return decodeString(bencodedString)
