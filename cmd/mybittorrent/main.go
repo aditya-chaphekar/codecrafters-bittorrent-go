@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -30,8 +31,9 @@ func decodeString(bencodedString string) (interface{}, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-
-	return bencodedString[firstColonIdx+1 : firstColonIdx+1+length], len(lengthStr) + 1 + length, nil
+	start := firstColonIdx + 1
+	end := start + length
+	return bencodedString[start:end], end, nil
 
 }
 
@@ -43,50 +45,57 @@ func decodeInt(bencodedString string) (interface{}, int, error) {
 			break
 		}
 	}
-	retInt, err := strconv.Atoi(bencodedString[1:EIdx])
+	numberStr := bencodedString[1:EIdx]
+	number, err := strconv.Atoi(numberStr)
 	if err != nil {
-		fmt.Println("Error Converting to Int", err)
+		return nil, 0, err
 	}
-
-	return retInt, len(bencodedString[1:EIdx]), nil
+	return number, EIdx + 1, nil
 }
 
-func decodeBencode(bencodedString string) (interface{}, error) {
-	i := 0
-	strLen := len(bencodedString)
-	var ret interface{}
-	for i = 0; i < strLen; i++ {
-		switch bencodedString[i] {
-		case 'i':
-			decodedInt, skip, err := decodeInt(bencodedString[i:])
-			i = skip
-			if err != nil {
-				fmt.Println("Error Decoding Int", err)
-			}
-			ret = decodedInt
+func decodeList(bencodedString string) (interface{}, int, error) {
+	retList := make([]interface{}, 0)
+	index := 1
+	for index < len(bencodedString) {
+		if bencodedString[index] == 'e' {
+			index += 1
 			break
-		default:
-			if unicode.IsDigit(rune(bencodedString[i])) {
-				decodedString, _, err := decodeString(bencodedString)
-				i = strLen
-				if err != nil {
-					fmt.Println("Error Decoding String", err)
-				}
-				ret = decodedString
-
-			}
 		}
+		decoded, offset, err := decodeBencode(bencodedString[index:])
+		if err != nil {
+			return nil, 0, err
+		}
+		retList = append(retList, decoded)
+		index += offset
 	}
-	return ret, nil
+	return retList, index, nil
 }
 
+func decodeBencode(bencodedString string) (interface{}, int, error) {
+	if len(bencodedString) == 0 {
+		return nil, 0, errors.New("empty bencoded string")
+	}
+	switch bencodedString[0] {
+	case 'i':
+		return decodeInt(bencodedString)
+	case 'l':
+		return decodeList(bencodedString)
+	// case 'd':
+	// 	return decodeDictionary(bencodedString)
+	default:
+		if unicode.IsDigit(rune(bencodedString[0])) {
+			return decodeString(bencodedString)
+		}
+		return nil, 0, errors.New("invalid bencoded string")
+	}
+}
 func main() {
 	command := os.Args[1]
 
 	if command == "decode" {
 		bencodedValue := os.Args[2]
 
-		decoded, err := decodeBencode(bencodedValue)
+		decoded, _, err := decodeBencode(bencodedValue)
 		if err != nil {
 			fmt.Println(err)
 			return
