@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"sort"
 	"strconv"
 	"unicode"
 	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
@@ -111,21 +113,88 @@ func decodeBencode(bencodedString string) (interface{}, int, error) {
 		return nil, 0, errors.New("invalid bencoded string")
 	}
 }
-
-func extractMetadata(bencodedData map[string]interface{}) (string, int, error) {
+func extractMetadata(bencodedData map[string]interface{}) (string, int, map[string]interface{}, error) {
 	announce, ok := bencodedData["announce"].(string)
 	if !ok {
-		return "", 0, errors.New("missing or invalid 'announce' field")
+		return "", 0, nil, errors.New("missing or invalid 'announce' field")
 	}
 	info, ok := bencodedData["info"].(map[string]interface{})
 	if !ok {
-		return "", 0, errors.New("missing or invalid 'info' field")
+		return "", 0, nil, errors.New("missing or invalid 'info' field")
 	}
 	length, ok := info["length"].(int)
 	if !ok {
-		return "", 0, errors.New("missing or invalid 'length' field")
+		return "", 0, nil, errors.New("missing or invalid 'length' field")
 	}
-	return announce, length, nil
+	return announce, length, info, nil
+}
+
+func computeInfoHash(infoDict map[string]interface{}) (string, error) {
+	// Sort the keys of the info dictionary
+	sortedKeys := make([]string, 0, len(infoDict))
+	for key := range infoDict {
+		sortedKeys = append(sortedKeys, key)
+	}
+	sort.Strings(sortedKeys)
+	// Create a new map with the sorted keys
+	sortedInfoDict := make(map[string]interface{})
+	for _, key := range sortedKeys {
+		sortedInfoDict[key] = infoDict[key]
+	}
+	// Bencode the sorted info dictionary
+	bencodedInfo, _, err := encodeBencode(sortedInfoDict)
+	if err != nil {
+		return "", err
+	}
+	// Compute the SHA-1 hash of the bencoded info dictionary
+	hash := sha1.New()
+	hash.Write([]byte(bencodedInfo))
+	infoHash := hash.Sum(nil)
+	// Convert the hash to a hexadecimal string
+	return hex.EncodeToString(infoHash), nil
+}
+
+// Function to bencode the data (similar to decode but for encoding)
+func encodeBencode(data interface{}) (string, int, error) {
+	switch v := data.(type) {
+	case string:
+		return fmt.Sprintf("%d:%s", len(v), v), len(v) + 2, nil
+	case int:
+		return fmt.Sprintf("i%de", v), len(fmt.Sprintf("i%de", v)), nil
+	case []interface{}:
+		result := "l"
+		for _, item := range v {
+			encoded, length, err := encodeBencode(item)
+			if err != nil {
+				return "", 0, err
+			}
+			result += encoded
+			result = result + encoded[length:]
+		}
+		return result + "e", len(result) + 1, nil
+	case map[string]interface{}:
+		result := "d"
+		// Sort the keys of the dictionary
+		sortedKeys := make([]string, 0, len(v))
+		for key := range v {
+			sortedKeys = append(sortedKeys, key)
+		}
+		sort.Strings(sortedKeys)
+		// Encode each key-value pair
+		for _, key := range sortedKeys {
+			encodedKey, _, err := encodeBencode(key)
+			if err != nil {
+				return "", 0, err
+			}
+			encodedValue, _, err := encodeBencode(v[key])
+			if err != nil {
+				return "", 0, err
+			}
+			result += encodedKey + encodedValue
+		}
+		return result + "e", len(result) + 1, nil
+	}
+	return "", 0, errors.New("unsupported type for bencoding")
 }
 
 func main() {
@@ -146,7 +215,7 @@ func main() {
 		break
 	case "info":
 		filePath := os.Args[2]
-		fileData, err := ioutil.ReadFile(filePath)
+		fileData, err := os.ReadFile(filePath)
 		if err != nil {
 			fmt.Println("Error reading file:", err)
 			return
@@ -157,12 +226,18 @@ func main() {
 			return
 		}
 		if dict, ok := decoded.(map[string]interface{}); ok {
-			announce, length, err := extractMetadata(dict)
+			announce, length, infoDict, err := extractMetadata(dict)
 			if err != nil {
 				fmt.Println("Error extracting metadata:", err)
 				return
 			}
-			fmt.Printf("Tracker URL: %s\nLength: %d\n", announce, length)
+			infoHash, err := computeInfoHash(infoDict)
+			if err != nil {
+				fmt.Println("Error computing info hash:", err)
+				return
+			}
+			// Print the tracker URL, file length, and info hash
+			fmt.Printf("Tracker URL: %s\nLength: %d\nInfo Hash: %s\n", announce, length, infoHash)
 		} else {
 			fmt.Println("Decoded data is not a dictionary")
 		}
