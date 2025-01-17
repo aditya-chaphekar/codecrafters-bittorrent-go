@@ -113,20 +113,29 @@ func decodeBencode(bencodedString string) (interface{}, int, error) {
 		return nil, 0, errors.New("invalid bencoded string")
 	}
 }
-func extractMetadata(bencodedData map[string]interface{}) (string, int, map[string]interface{}, error) {
+func extractMetadata(bencodedData map[string]interface{}) (string, int, map[string]interface{}, int, string, error) {
 	announce, ok := bencodedData["announce"].(string)
 	if !ok {
-		return "", 0, nil, errors.New("missing or invalid 'announce' field")
+		return "", 0, nil, 0, "", errors.New("missing or invalid 'announce' field")
 	}
 	info, ok := bencodedData["info"].(map[string]interface{})
 	if !ok {
-		return "", 0, nil, errors.New("missing or invalid 'info' field")
+		return "", 0, nil, 0, "", errors.New("missing or invalid 'info' field")
 	}
 	length, ok := info["length"].(int)
 	if !ok {
-		return "", 0, nil, errors.New("missing or invalid 'length' field")
+		return "", 0, nil, 0, "", errors.New("missing or invalid 'length' field")
 	}
-	return announce, length, info, nil
+	pieceLength, ok := info["piece length"].(int)
+	if !ok {
+		return "", 0, nil, 0, "", errors.New("missing or invalid 'piece length' field")
+	}
+	pieces, ok := info["pieces"].(string)
+	if !ok {
+		return "", 0, nil, 0, "", errors.New("missing or invalid 'pieces' field")
+	}
+	return announce, length, info, pieceLength, pieces, nil
+
 }
 
 func computeInfoHash(infoDict map[string]interface{}) (string, error) {
@@ -197,6 +206,14 @@ func encodeBencode(data interface{}) (string, int, error) {
 	return "", 0, errors.New("unsupported type for bencoding")
 }
 
+func printPieceHashes(pieces string) {
+	pieceCount := len(pieces) / 20
+	for i := 0; i < pieceCount; i++ {
+		hash := pieces[i*20 : (i+1)*20]
+		fmt.Printf("%s\n", hex.EncodeToString([]byte(hash)))
+	}
+}
+
 func main() {
 	command := os.Args[1]
 
@@ -226,7 +243,7 @@ func main() {
 			return
 		}
 		if dict, ok := decoded.(map[string]interface{}); ok {
-			announce, length, infoDict, err := extractMetadata(dict)
+			announce, length, infoDict, pieceLength, pieces, err := extractMetadata(dict)
 			if err != nil {
 				fmt.Println("Error extracting metadata:", err)
 				return
@@ -238,6 +255,9 @@ func main() {
 			}
 			// Print the tracker URL, file length, and info hash
 			fmt.Printf("Tracker URL: %s\nLength: %d\nInfo Hash: %s\n", announce, length, infoHash)
+			// Print the piece length and piece hashes
+			fmt.Printf("Piece Length: %d\nPiece Hashes:\n", pieceLength)
+			printPieceHashes(pieces)
 		} else {
 			fmt.Println("Decoded data is not a dictionary")
 		}
