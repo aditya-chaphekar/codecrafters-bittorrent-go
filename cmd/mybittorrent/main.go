@@ -8,12 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
@@ -297,6 +300,50 @@ func convertToPercentEncoded(input string) string {
 	return builder.String()
 }
 
+// Generate a random Peer ID (20 bytes)
+func generatePeerID() [20]byte {
+	var peerID [20]byte
+	rand.Seed(time.Now().UnixNano())
+	for i := 0; i < 20; i++ {
+		peerID[i] = byte(rand.Intn(256))
+	}
+	return peerID
+}
+
+// Perform the handshake with the peer
+func performHandshake(peerAddress string, infoHash string) (string, error) {
+	// Create a TCP connection to the peer
+	conn, err := net.Dial("tcp", peerAddress)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to peer: %v", err)
+	}
+	defer conn.Close()
+	// Prepare the handshake message
+	protocol := "BitTorrent protocol"
+	reserved := make([]byte, 8)                    // 8 reserved bytes set to zero
+	peerID := generatePeerID()                     // Generate a random 20-byte peer ID
+	infoHashBytes, _ := hex.DecodeString(infoHash) // Convert the hex infoHash to bytes
+	// Construct the handshake message
+	message := append([]byte{19}, []byte(protocol)...)
+	message = append(message, reserved...)
+	message = append(message, infoHashBytes...)
+	message = append(message, peerID[:]...)
+	// Send the handshake message
+	_, err = conn.Write(message)
+	if err != nil {
+		return "", fmt.Errorf("failed to send handshake message: %v", err)
+	}
+	// Read the response (it should be the same format as the handshake)
+	response := make([]byte, 68) // Expected size of a handshake response
+	_, err = io.ReadFull(conn, response)
+	if err != nil {
+		return "", fmt.Errorf("failed to read handshake response: %v", err)
+	}
+	// Extract the peer ID from the response
+	peerIDResponse := response[48:68]
+	return hex.EncodeToString(peerIDResponse), nil
+}
+
 func main() {
 	command := os.Args[1]
 
@@ -386,6 +433,45 @@ func main() {
 			fmt.Println("Decoded data is not a dictionary")
 		}
 		break
+	case "handshake":
+		filePath := os.Args[2]
+		peerAddress := os.Args[3]
+		// Read the torrent file
+		fileData, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Println("Error reading file:", err)
+			return
+		}
+		decoded, _, err := decodeBencode(string(fileData))
+		if err != nil {
+			fmt.Println("Error decoding file:", err)
+			return
+		}
+		if dict, ok := decoded.(map[string]interface{}); ok {
+			// Extract the metadata to get the announce and infoHash
+			_, _, infoDict, _, _, err := extractMetadata(dict)
+			if err != nil {
+				fmt.Println("Error extracting metadata:", err)
+				return
+			}
+			infoHash, err := computeInfoHash(infoDict)
+			if err != nil {
+				fmt.Println("Error computing info hash:", err)
+				return
+			}
+			// Perform handshake
+			peerID, err := performHandshake(peerAddress, infoHash)
+			if err != nil {
+				fmt.Println("Error performing handshake:", err)
+				return
+			}
+			// Print the received peer ID
+			fmt.Printf("Peer ID: %s\n", peerID)
+		} else {
+			fmt.Println("Decoded data is not a dictionary")
+		}
+		break
+
 	default:
 		fmt.Println("Unknown command specified")
 	}
