@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"unicode"
 	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
@@ -214,6 +219,84 @@ func printPieceHashes(pieces string) {
 	}
 }
 
+func decodeBencodeResponse(body io.Reader) (map[string]interface{}, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+	decoded, _, err := decodeBencode(string(data))
+	if err != nil {
+		return nil, err
+	}
+	if dict, ok := decoded.(map[string]interface{}); ok {
+		return dict, nil
+	}
+	return nil, fmt.Errorf("decoded response is not a dictionary")
+}
+
+func queryTracker(trackerURL string, infoHash string, peerId string, port int, fileLength int) ([]string, error) {
+	// Construct query parameters
+	queryParams := url.Values{}
+	//queryParams.Set("info_hash", infoHash) // URL-encode the raw info_hash bytes (this is correct)
+	queryParams.Set("peer_id", peerId)
+	queryParams.Set("port", strconv.Itoa(port))
+	queryParams.Set("uploaded", "0")
+	queryParams.Set("downloaded", "0")
+	queryParams.Set("left", strconv.Itoa(fileLength))
+	queryParams.Set("compact", "1")
+	// Construct the full URL with query parameters
+	fullURL := fmt.Sprintf("%s?%s&info_hash=%s", trackerURL, queryParams.Encode(), infoHash)
+	// Send GET request to the tracker
+	resp, err := http.Get(fullURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tracker: %v", err)
+	}
+	defer resp.Body.Close()
+	// Debugging: print the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tracker response: %v", err)
+	}
+	// Decode the bencoded response
+	decodedResponse, err := decodeBencodeResponse(bytes.NewReader(body)) // Pass body as Reader here
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode tracker response: %v", err)
+	}
+	// Check if failure reason exists
+	if failureReason, ok := decodedResponse["failure reason"].(string); ok {
+		return nil, fmt.Errorf("tracker returned failure reason: %s", failureReason)
+	}
+	// Extract peer list from the response
+	peers, ok := decodedResponse["peers"].(string)
+	if !ok {
+		return nil, fmt.Errorf("peers not found in tracker response")
+	}
+	// Parse the peer list (compact format) and return peer addresses
+	return parsePeers(peers), nil
+}
+func parsePeers(peers string) []string {
+	var peerList []string
+	for i := 0; i < len(peers); i += 6 {
+		ip := fmt.Sprintf("%d.%d.%d.%d", peers[i], peers[i+1], peers[i+2], peers[i+3])
+		port := int(peers[i+4])<<8 | int(peers[i+5])
+		peerList = append(peerList, fmt.Sprintf("%s:%d", ip, port))
+	}
+	return peerList
+}
+func convertToPercentEncoded(input string) string {
+	// Decode the hex string into a byte slice
+	data, err := hex.DecodeString(input)
+	if err != nil {
+		panic(err)
+	}
+	// Convert each byte to a percent-encoded string
+	var builder strings.Builder
+	for _, b := range data {
+		builder.WriteString(fmt.Sprintf("%%%02x", b))
+	}
+	return builder.String()
+}
+
 func main() {
 	command := os.Args[1]
 
@@ -258,6 +341,47 @@ func main() {
 			// Print the piece length and piece hashes
 			fmt.Printf("Piece Length: %d\nPiece Hashes:\n", pieceLength)
 			printPieceHashes(pieces)
+		} else {
+			fmt.Println("Decoded data is not a dictionary")
+		}
+		break
+	case "peers":
+		filePath := os.Args[2]
+		fileData, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Println("Error reading file:", err)
+			return
+		}
+		decoded, _, err := decodeBencode(string(fileData))
+		if err != nil {
+			fmt.Println("Error decoding file:", err)
+			return
+		}
+		if dict, ok := decoded.(map[string]interface{}); ok {
+			announce, _, infoDict, _, _, err := extractMetadata(dict)
+			if err != nil {
+				fmt.Println("Error extracting metadata:", err)
+				return
+			}
+			infoHash, err := computeInfoHash(infoDict)
+			if err != nil {
+				fmt.Println("Error computing info hash:", err)
+				return
+			}
+			peerID := "fbJ2mOZIPHbHVKoCzQE8"
+			fileLength, ok := dict["info"].(map[string]interface{})["length"].(int)
+			if !ok {
+				fmt.Println("Error: missing file length in torrent metadata")
+				return
+			}
+			peers, err := queryTracker(announce, convertToPercentEncoded(infoHash), peerID, 6881, fileLength)
+			if err != nil {
+				fmt.Println("Error querying tracker:", err)
+				return
+			}
+			for _, peer := range peers {
+				fmt.Println(peer)
+			}
 		} else {
 			fmt.Println("Decoded data is not a dictionary")
 		}
