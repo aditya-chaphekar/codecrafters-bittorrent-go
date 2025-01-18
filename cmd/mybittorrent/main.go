@@ -359,7 +359,9 @@ func checkRecievedMessage(conn net.Conn, expectedMessageID int) error {
 	if int(payloadBuf[0]) != expectedMessageID {
 		return errors.New("unexpected message ID")
 	}
-	fmt.Println("Received message ID:", payloadBuf[0])
+	if expectedMessageID == 7 {
+		fmt.Println("Recieved Message ID:", payloadBuf)
+	}
 	return nil
 }
 
@@ -512,9 +514,6 @@ func main() {
 			filePath = os.Args[3]
 			pieceIndex = os.Args[4]
 		}
-		fmt.Println("Output Path:", outputPath)
-		fmt.Println("File Path:", filePath)
-		fmt.Println("Piece Index:", pieceIndex)
 		// Read the torrent file
 		fileData, err := os.ReadFile(filePath)
 		if err != nil {
@@ -606,6 +605,9 @@ func main() {
 				if blockOffset+blockSize > pieceSize {
 					blockSize = pieceSize - blockOffset
 				}
+				if blockSize == 0 {
+					break
+				}
 				var reqbuf bytes.Buffer
 				binary.Write(&reqbuf, binary.BigEndian, uint32(pieceIndexInt))
 				binary.Write(&reqbuf, binary.BigEndian, uint32(blockOffset))
@@ -617,46 +619,39 @@ func main() {
 					fmt.Println("Error sending request message:", err)
 					return
 				}
-				if err := checkRecievedMessage(conn, 7); err != nil {
-					fmt.Println("Error checking piece message:", err)
-					return
-				}
+				// Read the payload consist of index, begin, block
 				buf := make([]byte, 4)
 				_, err = conn.Read(buf)
 				if err != nil {
 					fmt.Println(err)
 					return
 				}
+
 				payloadBuf := make([]byte, binary.BigEndian.Uint32(buf))
-				fmt.Println("created payloadBuf:", payloadBuf)
-				_, err = conn.Read(payloadBuf)
+				_, err = io.ReadFull(conn, payloadBuf)
 				if err != nil {
 					fmt.Println(err)
 					return
 				}
-				fmt.Println("Received payload buff:", payloadBuf)
+				if int(payloadBuf[0]) != 7 {
+					fmt.Println("Unexpected message ID")
+					return
+				}
+				data = append(data, payloadBuf[9:]...)
 
-				data = append(data, payloadBuf...)
 			}
-			// Write the downloaded piece to the output file
-			outputFile, err := os.OpenFile(outputPath, os.O_RDWR|os.O_CREATE, 0755)
+			file, err := os.Create(outputPath)
 			if err != nil {
-				fmt.Println("Error opening output file:", err)
+				fmt.Println(err)
 				return
 			}
-			defer outputFile.Close()
-			// Seek to the correct position in the file
-			_, err = outputFile.Seek(int64(pieceIndexInt*pieceLength), 0)
+			defer file.Close()
+			_, err = file.Write(data)
 			if err != nil {
-				fmt.Println("Error seeking to file position:", err)
+				fmt.Println(err)
 				return
 			}
-			// Write the downloaded piece to the file
-			_, err = outputFile.Write(data)
-			if err != nil {
-				fmt.Println("Error writing to file:", err)
-				return
-			}
+			fmt.Printf("Piece downloaded to %s.\n", outputPath)
 
 		} else {
 			fmt.Println("Decoded data is not a dictionary")
