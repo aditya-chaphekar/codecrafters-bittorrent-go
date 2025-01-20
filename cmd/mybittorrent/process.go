@@ -7,7 +7,7 @@ import (
 )
 
 func ProcessInfo() {
-	decoded := ReadFileAndDecode()
+	decoded := ReadFileAndDecode(nil)
 	if dict, ok := decoded.(map[string]interface{}); ok {
 		announce, length, infoDict, pieceLength, pieces, err := ExtractMetadata(dict)
 		if err != nil {
@@ -30,7 +30,7 @@ func ProcessInfo() {
 }
 
 func ProcessPeersInfo() {
-	decoded := ReadFileAndDecode()
+	decoded := ReadFileAndDecode(nil)
 	if dict, ok := decoded.(map[string]interface{}); ok {
 		announce, _, infoDict, _, _, err := ExtractMetadata(dict)
 		if err != nil {
@@ -64,7 +64,7 @@ func ProcessPeersInfo() {
 
 func ProcessHandshake() {
 	peerAddress := os.Args[3]
-	decoded := ReadFileAndDecode()
+	decoded := ReadFileAndDecode(nil)
 	if dict, ok := decoded.(map[string]interface{}); ok {
 		// Extract the metadata to get the announce and infoHash
 		_, _, infoDict, _, _, err := ExtractMetadata(dict)
@@ -95,8 +95,4 @@ func ProcessHandshake() {
 	} else {
 		fmt.Println("Decoded data is not a dictionary")
 	}
-}
-
-func ProcessDownloadPiece() {
-
 }

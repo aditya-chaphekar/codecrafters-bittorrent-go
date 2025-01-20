@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -93,12 +95,57 @@ func ReadTorrentFile(path string) []byte {
 	return fileData
 }
 
-func ReadFileAndDecode() interface{} {
-	fileData := ReadTorrentFile(os.Args[2])
+func ReadFileAndDecode(filepath *string) interface{} {
+	path := filepath
+	if filepath == nil {
+		path = &os.Args[2]
+	}
+	fileData := ReadTorrentFile(*path)
 	decoded, _, err := DecodeBencode(string(fileData))
 	if err != nil {
 		fmt.Println("Error decoding file:", err)
 		return nil
 	}
 	return decoded
+}
+
+func ReadBlock(conn net.Conn, index int, blockSize int, pieceSize int, pieceIndexInt int) ([]byte, error) {
+	blockOffset := index * blockSize
+	if blockOffset+blockSize > pieceSize {
+		blockSize = pieceSize - blockOffset
+	}
+	if blockSize == 0 {
+		return nil, errors.New("block size is 0")
+	}
+	var reqbuf bytes.Buffer
+	binary.Write(&reqbuf, binary.BigEndian, uint32(pieceIndexInt))
+	binary.Write(&reqbuf, binary.BigEndian, uint32(blockOffset))
+	binary.Write(&reqbuf, binary.BigEndian, uint32(blockSize))
+	requestMessage := CreatePeerMessage(6, reqbuf.Bytes())
+
+	_, err := conn.Write(requestMessage)
+	if err != nil {
+		fmt.Println("Error sending request message:", err)
+		return nil, err
+	}
+	// Read the payload consist of index, begin, block
+	buf := make([]byte, 4)
+	_, err = conn.Read(buf)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+
+	payloadBuf := make([]byte, binary.BigEndian.Uint32(buf))
+	_, err = io.ReadFull(conn, payloadBuf)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	if int(payloadBuf[0]) != 7 {
+		fmt.Println("Unexpected message ID")
+		return nil, errors.New("unexpected message ID")
+	}
+	return payloadBuf[9:], nil
+
 }
